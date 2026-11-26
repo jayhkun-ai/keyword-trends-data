@@ -1,0 +1,23 @@
+{
+  "title": "Keyword Trends Data: raw Google Trends 0-100 series and related queries",
+  "description": "<p>Weekly Google Trends 0-100 index for the query &ldquo;keyword trends&rdquo; (US, today 12-m, 53 weeks) plus 87 related-query rows for four seeds, with three reproducible Python scripts. The index is a share of the busiest week in the chosen window, not search volume. Full explanation, download links and worked examples: <a href=\"https://keywordtrendsguide.com/data/\">https://keywordtrendsguide.com/data/</a></p>",
+  "upload_type": "software",
+  "creators": [
+    {
+      "name": "jayhkun-ai"
+    }
+  ],
+  "keywords": [
+    "google trends",
+    "keyword research",
+    "seo",
+    "0-100 index",
+    "related queries"
+  ],
+  "related_identifiers": [
+    {
+      "identifier": "https://keywordtrendsguide.com/data/",
+      "relation": "isDocumentedBy"
+    }
+  ]
+}
