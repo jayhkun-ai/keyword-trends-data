@@ -1,117 +1,71 @@
-#!/usr/bin/env python3
-"""Convert Google Trends 0-100 index readings into share-of-peak percentages.
+# Keyword Trends Data — raw Google Trends 0-100 series
 
-Google Trends normalises each series so the busiest week in the chosen window
-equals 100. That 100 is window-specific: it is NOT search volume and is NOT
-comparable across different date ranges. This script makes the arithmetic
-explicit so a reading of 20 can be stated precisely ("20% as searched as the
-busiest week of this window").
+Raw, reproducible exports from Google Trends, plus small scripts that turn the 0-100 index into statements you can actually defend. Every number in `data/` came back from Google Trends through `pytrends`; nothing is estimated, smoothed, or hand-entered.
 
-It also separates the unfinished trailing week. Trends exports carry an
-`isPartial` column, and the last row is commonly partial. Averaging that row in
-with complete weeks changes the numbers you would quote, so both blocks are
-printed and you have to say which one you used.
+The point of this repo is one specific misunderstanding. People read a Google Trends index of 20 and say "search volume dropped 80 percent." What the 20 actually means is *20 percent as searched as the busiest week in the chosen window*. That busiest week is rebuilt to 100 every time you change the date range, so a 100 pulled last year and a 100 pulled today are not the same quantity. The scripts here make that arithmetic explicit.
 
-Standard library only.
+## Files
 
-Usage:
-    python share_of_peak.py data/keyword_trends_us_12m.csv
+| File | Rows | What it is | Where it came from |
+|---|---|---|---|
+| `data/keyword_trends_us_12m.csv` | 53 | Weekly index for `keyword trends`, US, `today 12-m`. Columns: `date, keyword trends, isPartial`. | Google Trends interest-over-time, pulled 2026-11-26 |
+| `data/related_queries.csv` | 87 | Long-format top and rising related queries for 4 seeds: `keyword trends`, `google trends`, `keyword research`, `seo keyword research`. Columns: `seed_query, list, related_query, value`. | Google Trends related-queries, geo=US, `today 12-m`, pulled 2026-11-26 |
+| `share_of_peak.py` | — | Converts index readings to share-of-peak percentages; prints peak and low week, all-week mean, first-4 vs last-4 mean. | This repo |
+| `rank_related.py` | — | Ranks related queries per seed and prints markdown; keeps `top` (relative interest) and `rising` (percent growth) units separate. | This repo |
+| `pull_trends.py` | — | Re-pulls the files above so you can verify them or move them to another country or window. | This repo |
 
-Input: CSV with a header; column 1 is the date, column 2 the numeric index, and
-an optional column named isPartial (matched case-insensitively).
-Output: per-week share of peak, then two summary blocks.
-"""
+No third-party packages are needed for `share_of_peak.py` or `rank_related.py`. Only `pull_trends.py` needs `pytrends`.
 
-import csv
-import sys
+## What the data actually says
 
+Direct readings from `data/keyword_trends_us_12m.csv`, produced by running the script:
 
-def load(path):
-    """Return (rows_in_file_order, set_of_partial_dates).
+```
+$ python share_of_peak.py data/keyword_trends_us_12m.csv
+rows = 53  partial rows = 1
+peak index = 100 (week of 2026-01-18)
+low index = 0 (week of 2026-08-30, complete weeks only)
+partial rows excluded from the low: 2026-11-22
+...
+as-exported (partial week included): n=53 mean=41.26 first4=31.75 last4=11.50 first4/last4=2.76x
+complete weeks only (partial dropped): n=52 mean=41.90 first4=31.75 last4=14.25 first4/last4=2.23x
+```
 
-    rows is a list of (date, value). Rows that do not parse as a number are
-    skipped rather than guessed.
-    """
-    with open(path, newline="", encoding="utf-8-sig") as f:
-        raw = list(csv.reader(f))
-    if not raw:
-        return [], set()
+Four things worth noticing, all traceable to those lines:
 
-    header = [c.strip().lower() for c in raw[0]]
-    partial_col = header.index("ispartial") if "ispartial" in header else None
+1. The peak is a single week in January. One week at 100 does not make a trend; the mean is 41.26 precisely because most weeks sit far below the peak.
+2. Six **complete** weeks read 0 (2026-08-30, 2026-09-13, 2026-09-20, 2026-09-27, 2026-10-04, 2026-10-18). The trough is real. What is not real is treating the trailing partial week — 2026-11-22, flagged `isPartial = True` — as another low; it is an unfinished week.
+3. The partial row is not cosmetic. Counting it makes the last-4 mean 11.50; dropping it makes the same statistic 14.25 over 52 rows. The script prints both blocks so you cannot pick one silently.
+4. The first-4 vs last-4 ratio is therefore 2.76× (as exported) or 2.23× (complete weeks only). Both are defensible; publishing one without saying which is not. And both are measured against this window's own January peak — re-pull with `today 5-y` and the same calendar weeks will not carry the same numbers, because 100 moves.
 
-    rows = []
-    partial = set()
-    for r in raw[1:]:
-        if len(r) < 2:
-            continue
-        try:
-            value = float(r[1])
-        except ValueError:
-            continue
-        rows.append((r[0], value))
-        if (
-            partial_col is not None
-            and len(r) > partial_col
-            and r[partial_col].strip().lower() == "true"
-        ):
-            partial.add(r[0])
-    return rows, partial
+## Reproduce
 
+```sh
+git clone https://github.com/jayhkun-ai/keyword-trends-data
+cd keyword-trends-data
+python share_of_peak.py data/keyword_trends_us_12m.csv
+python rank_related.py data/related_queries.csv --seed "keyword trends"
+```
 
-def block(label, rows):
-    """Print mean / first4 / last4 for one subset of rows."""
-    vals = [v for _, v in rows]
-    if not vals:
-        print(f"{label}: no rows")
-        return
-    mean = sum(vals) / len(vals)
-    first4 = sum(vals[:4]) / min(4, len(vals))
-    last4 = sum(vals[-4:]) / min(4, len(vals))
-    ratio = (first4 / last4) if last4 else float("inf")
-    print(
-        f"{label}: n={len(vals)} mean={mean:.2f} "
-        f"first4={first4:.2f} last4={last4:.2f} first4/last4={ratio:.2f}x"
-    )
+To re-pull from Google instead of trusting the committed CSV:
 
+```sh
+pip install pytrends==4.9.2 pandas
+python pull_trends.py --keyword "keyword trends" --geo US --timeframe "today 12-m" --out data/check.csv
+```
 
-def main():
-    if len(sys.argv) < 2:
-        sys.exit("Usage: python share_of_peak.py <input.csv>")
+## Method notes and traps
 
-    rows, partial_dates = load(sys.argv[1])
-    if not rows:
-        sys.exit("No numeric readings found in that file.")
+These are observed failures from the actual pull, not general advice:
 
-    peak = max(v for _, v in rows)
-    peak_date = next(d for d, v in rows if v == peak)
-    complete = [(d, v) for d, v in rows if d not in partial_dates]
+- `pytrends` 4.9.2 with `urllib3` 2.x: passing `retries=` to `TrendReq` raises `TypeError: __init__() got an unexpected keyword argument 'retries'`. Omit it and retry yourself.
+- Two calls in one session back to back commonly returns `429 Too Many Requests`. `pull_trends.py` sleeps 8 seconds between calls by default; raise it with `--sleep` if you still get 429.
+- `gprop=""` is web search. News, images, and YouTube are separate series with separate normalisations and must not be compared against each other.
+- Related-queries `top` values are relative interest scaled within that seed's own top list, so the top row is always 100. `rising` values are percent growth versus the earlier half of the same window, and a breakout is stored as `-1` in the CSV because its growth is unbounded — `rank_related.py` prints those as `Breakout` instead of inventing a figure.
+- `interest_over_time` returns a limited number of buckets per window. Longer ranges come back weekly or monthly depending on length; check the `date` column before assuming weekly spacing.
 
-    print(f"rows = {len(rows)}  partial rows = {len(partial_dates)}")
-    print(f"peak index = {peak:.0f} (week of {peak_date})")
-    if complete:
-        low = min(v for _, v in complete)
-        low_date = next(d for d, v in complete if v == low)
-        print(f"low index = {low:.0f} (week of {low_date}, complete weeks only)")
-    if partial_dates:
-        print(f"partial rows excluded from the low: {', '.join(sorted(partial_dates))}")
-    print()
+## Attribution
 
-    print("date,index,share_of_peak_pct,partial")
-    for date, v in rows:
-        pct = 100.0 * v / peak if peak else 0.0
-        flag = "True" if date in partial_dates else "False"
-        print(f"{date},{v:.0f},{pct:.2f},{flag}")
+If you use these files, cite the repo and note that the underlying values are Google Trends normalised indices, not search volumes. Google Trends data is provided by Google under its own terms; this repo only republishes the normalised series that its public interface returns.
 
-    print()
-    print("Two blocks are printed on purpose: they differ only by whether the")
-    print("unfinished week is included, and that choice changes the ratio you quote.")
-    block("as-exported (partial week included)", rows)
-    block("complete weeks only (partial dropped)", complete)
-    print()
-    print("share_of_peak_pct = 100 * week_index / peak_index")
-    print("The index is a share of the busiest week in THIS window, not a search count.")
-
-
-if __name__ == "__main__":
-    main()
+A longer written explanation of the index and of the query method is at [keywordtrendsguide.com](https://keywordtrendsguide.com/).
