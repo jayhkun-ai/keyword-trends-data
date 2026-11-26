@@ -8,7 +8,7 @@ The point of this repo is one specific misunderstanding. People read a Google Tr
 
 | File | Rows | What it is | Where it came from |
 |---|---|---|---|
-| `data/keyword_trends_us_12m.csv` | 53 | Weekly index for `keyword trends`, US, `today 12-m`. Columns: `date, index, isPartial`. | Google Trends interest-over-time, pulled 2026-11-26 |
+| `data/keyword_trends_us_12m.csv` | 53 | Weekly index for `keyword trends`, US, `today 12-m`. Columns: `date, keyword trends, isPartial`. | Google Trends interest-over-time, pulled 2026-11-26 |
 | `data/related_queries.csv` | 87 | Long-format top and rising related queries for 4 seeds: `keyword trends`, `google trends`, `keyword research`, `seo keyword research`. Columns: `seed_query, list, related_query, value`. | Google Trends related-queries, geo=US, `today 12-m`, pulled 2026-11-26 |
 | `share_of_peak.py` | — | Converts index readings to share-of-peak percentages; prints peak and low week, all-week mean, first-4 vs last-4 mean. | This repo |
 | `rank_related.py` | — | Ranks related queries per seed and prints markdown; keeps `top` (relative interest) and `rising` (percent growth) units separate. | This repo |
@@ -34,14 +34,14 @@ complete weeks only (partial dropped): n=52 mean=41.90 first4=31.75 last4=14.25 
 Four things worth noticing, all traceable to those lines:
 
 1. The peak is a single week in January. One week at 100 does not make a trend; the mean is 41.26 precisely because most weeks sit far below the peak.
-2. Six **complete** weeks read 0 (2026-08-30, 2026-09-13, 2026-09-20, 2026-09-27, 2026-10-04, 2026-10-18). The trough is real. What is not real is treating the last row — 2026-11-22, flagged `isPartial = True` — as another low; it is an unfinished week.
+2. Six **complete** weeks read 0 (2026-08-30, 2026-09-13, 2026-09-20, 2026-09-27, 2026-10-04, 2026-10-18). The trough is real. What is not real is treating the trailing partial week — 2026-11-22, flagged `isPartial = True` — as another low; it is an unfinished week.
 3. The partial row is not cosmetic. Counting it makes the last-4 mean 11.50; dropping it makes the same statistic 14.25 over 52 rows. The script prints both blocks so you cannot pick one silently.
 4. The first-4 vs last-4 ratio is therefore 2.76× (as exported) or 2.23× (complete weeks only). Both are defensible; publishing one without saying which is not. And both are measured against this window's own January peak — re-pull with `today 5-y` and the same calendar weeks will not carry the same numbers, because 100 moves.
 
 ## Reproduce
 
 ```sh
-git clone https://github.com/<your-account>/keyword-trends-data
+git clone https://github.com/jayhkun-ai/keyword-trends-data
 cd keyword-trends-data
 python share_of_peak.py data/keyword_trends_us_12m.csv
 python rank_related.py data/related_queries.csv --seed "keyword trends"
