@@ -1,116 +1,73 @@
 #!/usr/bin/env python3
-"""Convert Google Trends 0-100 index readings into share-of-peak percentages.
+"""Rank related queries from data/related_queries.csv and print a markdown table.
 
-Google Trends normalises each series so the busiest week in the chosen window
-equals 100. That 100 is window-specific: it is NOT search volume and is NOT
-comparable across different date ranges. This script makes the arithmetic
-explicit so a reading of 20 can be stated precisely ("20% as searched as the
-busiest week of this window").
+The CSV is long format: seed_query, list (top|rising), related_query, value.
+`value` means different things per list, and this script keeps them apart:
 
-It also separates the unfinished trailing week. Trends exports carry an
-`isPartial` column, and the last row is commonly partial. Averaging that row in
-with complete weeks changes the numbers you would quote, so both blocks are
-printed and you have to say which one you used.
+  * top    -> relative interest, 0-100, scaled against the peak query in that
+              same seed's top list. It is a share of a peak, not a search count.
+  * rising -> percent growth versus the earlier half of the same window.
+              Google renders a breakout as "Breakout"; the CSV stores it as -1
+              because the growth is unbounded. This script prints those as
+              "Breakout" instead of inventing a number.
 
 Standard library only.
 
 Usage:
-    python share_of_peak.py data/keyword_trends_us_12m.csv
-
-Input: CSV with a header; column 1 is the date, column 2 the numeric index, and
-an optional column named isPartial (matched case-insensitively).
-Output: per-week share of peak, then two summary blocks.
+    python rank_related.py data/related_queries.csv
+    python rank_related.py data/related_queries.csv --seed "keyword trends" --list top
 """
 
+import argparse
 import csv
 import sys
+from collections import defaultdict
+
+
+BREAKOUT = -1
 
 
 def load(path):
-    """Return (rows_in_file_order, set_of_partial_dates).
-
-    rows is a list of (date, value). Rows that do not parse as a number are
-    skipped rather than guessed.
-    """
     with open(path, newline="", encoding="utf-8-sig") as f:
-        raw = list(csv.reader(f))
-    if not raw:
-        return [], set()
-
-    header = [c.strip().lower() for c in raw[0]]
-    partial_col = header.index("ispartial") if "ispartial" in header else None
-
-    rows = []
-    partial = set()
-    for r in raw[1:]:
-        if len(r) < 2:
-            continue
-        try:
-            value = float(r[1])
-        except ValueError:
-            continue
-        rows.append((r[0], value))
-        if (
-            partial_col is not None
-            and len(r) > partial_col
-            and r[partial_col].strip().lower() == "true"
-        ):
-            partial.add(r[0])
-    return rows, partial
-
-
-def block(label, rows):
-    """Print mean / first4 / last4 for one subset of rows."""
-    vals = [v for _, v in rows]
-    if not vals:
-        print(f"{label}: no rows")
-        return
-    mean = sum(vals) / len(vals)
-    first4 = sum(vals[:4]) / min(4, len(vals))
-    last4 = sum(vals[-4:]) / min(4, len(vals))
-    ratio = (first4 / last4) if last4 else float("inf")
-    print(
-        f"{label}: n={len(vals)} mean={mean:.2f} "
-        f"first4={first4:.2f} last4={last4:.2f} first4/last4={ratio:.2f}x"
-    )
+        return list(csv.DictReader(f))
 
 
 def main():
-    if len(sys.argv) < 2:
-        sys.exit("Usage: python share_of_peak.py <input.csv>")
+    p = argparse.ArgumentParser()
+    p.add_argument("csv_path")
+    p.add_argument("--seed")
+    p.add_argument("--list", dest="list_name", choices=["top", "rising"])
+    p.add_argument("--limit", type=int, default=0, help="0 = no limit")
+    a = p.parse_args()
 
-    rows, partial_dates = load(sys.argv[1])
+    rows = load(a.csv_path)
     if not rows:
-        sys.exit("No numeric readings found in that file.")
+        sys.exit("CSV has no rows.")
 
-    peak = max(v for _, v in rows)
-    peak_date = next(d for d, v in rows if v == peak)
-    complete = [(d, v) for d, v in rows if d not in partial_dates]
+    buckets = defaultdict(list)
+    for r in rows:
+        if a.seed and r["seed_query"] != a.seed:
+            continue
+        if a.list_name and r["list"] != a.list_name:
+            continue
+        buckets[(r["seed_query"], r["list"])].append((r["related_query"], int(r["value"])))
 
-    print(f"rows = {len(rows)}  partial rows = {len(partial_dates)}")
-    print(f"peak index = {peak:.0f} (week of {peak_date})")
-    if complete:
-        low = min(v for _, v in complete)
-        low_date = next(d for d, v in complete if v == low)
-        print(f"low index = {low:.0f} (week of {low_date}, complete weeks only)")
-    if partial_dates:
-        print(f"partial rows excluded from the low: {', '.join(sorted(partial_dates))}")
-    print()
+    if not buckets:
+        sys.exit("No rows matched those filters.")
 
-    print("date,index,share_of_peak_pct,partial")
-    for date, v in rows:
-        pct = 100.0 * v / peak if peak else 0.0
-        flag = "True" if date in partial_dates else "False"
-        print(f"{date},{v:.0f},{pct:.2f},{flag}")
-
-    print()
-    print("Two blocks are printed on purpose: they differ only by whether the")
-    print("unfinished week is included, and that choice changes the ratio you quote.")
-    block("as-exported (partial week included)", rows)
-    block("complete weeks only (partial dropped)", complete)
-    print()
-    print("share_of_peak_pct = 100 * week_index / peak_index")
-    print("The index is a share of the busiest week in THIS window, not a search count.")
+    for (seed, list_name), items in buckets.items():
+        items.sort(key=lambda x: (-x[1], x[0]))
+        if a.limit:
+            items = items[: a.limit]
+        unit = "relative interest (0-100, peak = 100)" if list_name == "top" else "growth vs earlier half of window"
+        print(f"### `{seed}` — {list_name} ({unit})")
+        print()
+        print("| # | query | value |")
+        print("|---:|---|---:|")
+        for i, (q, v) in enumerate(items, 1):
+            shown = "Breakout" if (list_name == "rising" and v == BREAKOUT) else (f"+{v}%" if list_name == "rising" else str(v))
+            print(f"| {i} | {q} | {shown} |")
+        print()
 
 
 if __name__ == "__main__":
